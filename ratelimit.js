@@ -20,11 +20,16 @@ const HEADERS = {
 const SECONDS_IN_MONTH = 2678400;
 
 /* RateLimiter: stores timeout information and dispatches requests in a rate-limited fashion */
-function RateLimiter(mode, timeoutLimit) {
+function RateLimiter(mode, limit) {
   mode = (mode === undefined) ? MODE.SINGLE : mode;
-  timeoutLimit = (timeoutLimit === undefined) ? -1 : timeoutLimit;
+  limit = (limit === undefined) ? -1 : limit;
   this.mode = mode;
-  this.timeoutLimit = timeoutLimit;
+  if (this.mode === MODE.SINGLE || this.mode === MODE.PROMISE) {
+    this.timeoutLimit = limit;
+    this.timeouts = [];
+  } else if (this.mode === MODE.QUEUE) {
+    this.queueLimit = limit;
+  }
   this.calls = {};
 
   if (this.mode === MODE.QUEUE) {
@@ -83,7 +88,7 @@ RateLimiter.prototype.updateTimeout = function(call, headers) {
 };
 
 /* private methods */
-RateLimiter.prototype._getValueFromKeyLowerCase(key, dict) {
+RateLimiter.prototype._getValueFromKeyLowerCase = function(key, dict) {
   for (k in dict) {
     if (key === k.toLowerCase()) {
       return dict[k];
@@ -93,26 +98,33 @@ RateLimiter.prototype._getValueFromKeyLowerCase(key, dict) {
 };
 
 RateLimiter.prototype._getUpdateTimeoutWrapper = function(call) {
-  var context = this;
-  return function(headers) {
-    return context.updateTimeout(call, headers);
+  var func = function(headers) {
+    return this.updateTimeout(call, headers);
   };
+  return func.bind(this);
 };
 
 RateLimiter.prototype._dispatch_single = function(call, action, cb) {
-  var context = this;
   let timeout = this.calls[call] - Date.now();
   if (timeout <= this.timeoutLimit || this.timeoutLimit === -1) { // Timeout is small enough or limit is not enabled
-    setTimeout(function() {
-      action(context._getUpdateTimeoutWrapper(call));
-      cb();
-    }, Math.max(timeout, 0)); // Not strictly necessary, but more explicit
+    this.timeouts.push(
+      setTimeout(function() {
+        action(this._getUpdateTimeoutWrapper(call));
+        cb();
+      }.bind(this), Math.max(timeout, 0))
+    );
   } else { // Timeout too long, fail the call
+    for (let i = 0; i < this.timeouts.length; i++) {
+      clearTimeout(this.timeouts[i]);
+    }
     throw "timeoutLimit exceeded";
   }
 };
 
 RateLimiter.prototype._dispatch_queue = function(call, action, cb) {
+  if (this.queue[call].length >= this.queueLimit) {
+    throw "Queue is full!";
+  }
   this.queue[call].push({
     action: action,
     cb: cb
@@ -126,11 +138,15 @@ RateLimiter.prototype._dispatch_queue = function(call, action, cb) {
 
   this.queueWorkerActive[call] = true;
   let timeout = this.calls[call] - Date.now();
-  setTimeout(this._queue_worker, Math.max(timeout, 0));
+  setTimeout(function() {
+    this._queue_worker(call);
+  }.bind(this), Math.max(timeout, 0));
 };
 
 RateLimiter.prototype._queue_worker = function(call) {
-  assert(this.queue[call].length !== 0, '_queue_worker called on empty queue!');
+  if (this.queue[call].length === 0) {
+    throw '_queue_worker called on empty queue!';
+  }
   
   let request = this.queue[call].shift();
   request.action(this._getUpdateTimeoutWrapper(call));
@@ -142,19 +158,25 @@ RateLimiter.prototype._queue_worker = function(call) {
   }
 
   let timeout = this.calls[call] - Date.now();
-  setTimeout(this._queue_worker, Math.max(timeout, 0));
+  setTimeout(function() {
+    this._queue_worker(call);
+  }.bind(this), Math.max(timeout, 0));
 };
 
 RateLimiter.prototype._dispatch_promise = function(call, action) {
-  var context = this;
   let timeout = this.calls[call] - Date.now();
   if (timeout <= this.timeoutLimit) { // Timeout is small enough
     return new Promise(function(resolve, reject) {
-      setTimeout(function() {
-        action(resolve, reject, context.getUpdateTimeoutWrapper(call));
-      }, Math.max(timeout, 0));
-    });
+      this.timeouts.push(
+        setTimeout(function() {
+          action(resolve, reject, this._getUpdateTimeoutWrapper(call).bind(this));
+        }.bind(this), Math.max(timeout, 0))
+    );
+    }.bind(this));
   } else {
+    for (let i = 0; i < this.timeouts.length; i++) {
+      clearTimeout(this.timeouts[i]);
+    }
     return new Promise(function(resolve, reject) {
       reject("timeoutLimit exceeded");
     });

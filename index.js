@@ -1,4 +1,4 @@
-const rateLimit = require('./rate-limit.js');
+const rateLimit = require('./ratelimit.js');
 
 module.exports = {
   RateLimiter : rateLimit.RateLimiter,
