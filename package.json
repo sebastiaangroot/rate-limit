@@ -1,0 +1,33 @@
+{
+  "name": "rate-limit",
+  "version": "0.0.0",
+  "description": "A simple Node.js package that estimates reasonable timeouts on API calls based on the HTTP header hints they provide.",
+  "main": "index.js",
+  "directories": {
+    "example": "examples",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "make test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sebastiaangroot/rate-limit.git"
+  },
+  "keywords": [
+    "rate",
+    "limit",
+    "node",
+    "js"
+  ],
+  "author": "Sebastiaan Groot <sebastiaangroot@gmail.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/sebastiaangroot/rate-limit/issues"
+  },
+  "homepage": "https://github.com/sebastiaangroot/rate-limit#readme",
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "mocha": "^3.2.0"
+  }
+}
