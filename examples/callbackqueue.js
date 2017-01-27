@@ -4,14 +4,8 @@ function recv() {
   var msg = {};
   msg['body'] = 'A simple message';
   msg['headers'] = {};
-  msg['headers']['Retry-After'] = Math.floor(Math.random() * 2);
+  msg['headers']['Retry-After'] = Math.floor(Math.random() * (4 - 1) + 1);
   return msg;
-}
-
-function request(updateHeaders) {
-  var msg = recv();
-  console.log(msg['body']);
-  updateHeaders(msg['headers']);
 }
 
 /* Places requests of a single type in a queue (of max length 10 here) and imposes appropriate rate-limiting */
@@ -20,7 +14,16 @@ rateLimiter = new ratelimit.RateLimiter(ratelimit.MODE.QUEUE, 10);
 var attempts = 5;
 function requestLoop() {
   try {
-    rateLimiter.dispatch('test-request', request);
+    rateLimiter.dispatch('test-request',
+      function(updateHeaders) {
+        var msg = recv();
+        console.log(msg['body']);
+        updateHeaders(msg['headers']);
+      },
+      function() { /* callbacks in MODE.QUEUE are used when the entire queue is empty */
+        console.log('The queue is empty!');
+      }
+    );
   } catch (err) {
     console.log('Error in rateLimiter.dispatch: ' + err);
     attempts--;
@@ -29,7 +32,7 @@ function requestLoop() {
       return;
     }
   }
-  setTimeout(requestLoop, 200);
+  setTimeout(requestLoop, 500);
 }
 
 requestLoop();

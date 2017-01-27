@@ -19,7 +19,25 @@ const HEADERS = {
 
 const SECONDS_IN_MONTH = 2678400;
 
-/* RateLimiter: stores timeout information and dispatches requests in a rate-limited fashion */
+/* RateLimiter: stores timeout information and dispatches requests in a rate-limited fashion 
+ *   mode:  [string]  one of the modes in the MODE object (SINGLE, QUEUE or PROMISE)
+ *   limit: [integer] -1 to disable, otherwise, its effect depends on the chosen mode
+ * [MODES]
+ *   SINGLE:  any function given to dispatch is executed with a timeout based on the last avaiable
+ *            rate-limiting hint. when receiving HTTP headers from a request, they can be used to update this
+ *            timeout hint. the limit argument refers to the maximum timeout (in ms) before RateLimiter
+ *            fails the request and throws an error. this can be useful to keep your calls responsive for end users
+ *            (it might be preferable to say that a certain call is currently unavailable rather than to have to
+ *            wait minutes before the request is executed).
+ *   QUEUE:   any function given to dispatch is added to a queue specific for this call id, after which the dispatch
+ *            function immediately returns. a seperate worker thread empties the queue, one action at a time,
+ *            reevaluating the correct timeout after each call. as long as the given action makes no asynchronous
+ *            calls, this ensures that rate-limiting hints in the previous message can be applied to the next
+ *            request.
+ *   PROMISE: any function given to dispatch is immediately returned as a promise. within the promise, a timeout
+ *            is first set, after which the supplied function is responsible to either resolve or reject the promise
+ *            (as per regular Promise semantics).
+ */
 function RateLimiter(mode, limit) {
   mode = (mode === undefined) ? MODE.SINGLE : mode;
   limit = (limit === undefined) ? -1 : limit;
@@ -44,7 +62,16 @@ function RateLimiter(mode, limit) {
  *   call:   [string]   identifying this call for the rate limiter
  *   action: [function] method that performs the external call
  *   cb:     [function] optional callback for when the action has finished
- * example: dispatch('Twitter:REST:GET friends/ids'), function() {...}, function() {...}  */
+ * example: dispatch('Twitter:REST:GET friends/ids'),
+ *                        function(handleHeaders) {...; handleHeaders(msg['headers']); ...},
+ *                        function() {...});  
+ * under SINGLE and QUEUE mode, action expected to accept one argument: action(handleHeaders);
+ * here, handleHeaders is a RateLimiter function that you can supply received HTTP headers to.
+ * the HTTP headers are expected to be accessible in the following way:
+ *   headerObj['headerName'] // gives the string content of the header
+ * under PROMISE mode, two additional functions are passed to action: action(resolve, reject, handleHeaders);
+ * resolve and reject work according to normal Promise behavior and should be used by the function.
+ */
 RateLimiter.prototype.dispatch = function(call, action, cb) {
   cb = (cb === undefined) ? function(){} : cb;
 
@@ -122,7 +149,7 @@ RateLimiter.prototype._dispatch_single = function(call, action, cb) {
 };
 
 RateLimiter.prototype._dispatch_queue = function(call, action, cb) {
-  if (this.queue[call].length >= this.queueLimit) {
+  if (this.queue[call].length >= this.queueLimit && this.queueLimit !== -1) {
     throw "Queue is full!";
   }
   this.queue[call].push({
@@ -165,7 +192,7 @@ RateLimiter.prototype._queue_worker = function(call) {
 
 RateLimiter.prototype._dispatch_promise = function(call, action) {
   let timeout = this.calls[call] - Date.now();
-  if (timeout <= this.timeoutLimit) { // Timeout is small enough
+  if (timeout <= this.timeoutLimit || this.timeoutLimit === -1) { // Timeout is small enough
     return new Promise(function(resolve, reject) {
       this.timeouts.push(
         setTimeout(function() {
