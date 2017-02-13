@@ -1,9 +1,3 @@
-/*
- * RateLimiter can be used in two modes of operation:
- *  1) Succeed calls within responsive timeout (e.g. timeouts < 1sec), called for every external call
- *  2) Request queue that RateLimiter automatically handles, with an optional callback when the queue is empty
-*/
-
 const MODE = {
   SINGLE : 'SINGLE',
   QUEUE  : 'QUEUE',
